@@ -10,13 +10,13 @@ https://www.youtube.com/watch?v=onTUHYr7aA0
 
 https://www.youtube.com/watch?v=rILDep7_05o
 
-# 📦 Installation
+# Installation
 To load the library into your script:
 ```lua
 local esplib = loadstring(game:HttpGet("https://raw.githubusercontent.com/tulontop/esp-lib.lua/refs/heads/main/source.lua"))()
 ```
 
-# 🧩 API Reference
+# API Reference
 ```lua
 esplib.add_box(instance: Instance)
 ```
@@ -45,7 +45,7 @@ esplib.add_tracer(instance: Instance)
 ```
 Creates a tracer to the instances main part.
 
-# ⚙️ Settings Table
+# Settings Table
 
 ```lua
 getgenv().esplib = {
@@ -81,10 +81,10 @@ getgenv().esplib = {
 ```
 (Optional) Allows you to customize the esp easily in real time. Add this on top of your code if wanted.
 
-# ▶️ Examples
+# Examples
 Find pre-made scripts in the examples folder.
 
-# 📝 Notes
+# Notes
 Fully made with drawing.
 
 This project is fully open source, feel free to modify it and use it on your own project.
