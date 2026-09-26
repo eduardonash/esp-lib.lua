@@ -8,7 +8,8 @@
 ]]
 
 -- // table
-local esplib = getgenv().esplib
+local options = ... or {}
+local esplib = options.settings or (not options.isolated and getgenv().esplib)
 if not esplib then
     esplib = {
         box = {
@@ -40,7 +41,7 @@ if not esplib then
             from = "mouse", -- mouse, head, top, bottom, center
         },
     }
-    getgenv().esplib = esplib
+    if not options.isolated then getgenv().esplib = esplib end
 end
 
 local espinstances = {}
@@ -53,83 +54,67 @@ local user_input_service = game:GetService("UserInputService")
 local camera = workspace.CurrentCamera
 
 -- // functions
+-- Cache direct body parts; accessories/tools need not distort player bounds.
+local bodycache = setmetatable({}, { __mode = "k" })
+local signs = {
+    Vector3.new(-1,-1,-1), Vector3.new(-1,-1,1),
+    Vector3.new(-1,1,-1), Vector3.new(-1,1,1),
+    Vector3.new(1,-1,-1), Vector3.new(1,-1,1),
+    Vector3.new(1,1,-1), Vector3.new(1,1,1)
+}
 local function get_bounding_box(instance)
-    local min, max = Vector2.new(math.huge, math.huge), Vector2.new(-math.huge, -math.huge)
-    local onscreen = false
-
-    if instance:IsA("Model") then
-        for _, p in ipairs(instance:GetChildren()) do
-            if p:IsA("BasePart") then
-                local size = (p.Size / 2) * esplib.box.padding
-                local cf = p.CFrame
-                for _, offset in ipairs({
-                    Vector3.new( size.X,  size.Y,  size.Z),
-                    Vector3.new(-size.X,  size.Y,  size.Z),
-                    Vector3.new( size.X, -size.Y,  size.Z),
-                    Vector3.new(-size.X, -size.Y,  size.Z),
-                    Vector3.new( size.X,  size.Y, -size.Z),
-                    Vector3.new(-size.X,  size.Y, -size.Z),
-                    Vector3.new( size.X, -size.Y, -size.Z),
-                    Vector3.new(-size.X, -size.Y, -size.Z),
-                }) do
-                    local pos, visible = camera:WorldToViewportPoint(cf:PointToWorldSpace(offset))
-                    if visible then
-                        local v2 = Vector2.new(pos.X, pos.Y)
-                        min = min:Min(v2)
-                        max = max:Max(v2)
-                        onscreen = true
-                    end
-                end
-            elseif p:IsA("Accessory") then
-                local handle = p:FindFirstChild("Handle")
-                if handle and handle:IsA("BasePart") then
-                    local size = (handle.Size / 2) * esplib.box.padding
-                    local cf = handle.CFrame
-                    for _, offset in ipairs({
-                        Vector3.new( size.X,  size.Y,  size.Z),
-                        Vector3.new(-size.X,  size.Y,  size.Z),
-                        Vector3.new( size.X, -size.Y,  size.Z),
-                        Vector3.new(-size.X, -size.Y,  size.Z),
-                        Vector3.new( size.X,  size.Y, -size.Z),
-                        Vector3.new(-size.X,  size.Y, -size.Z),
-                        Vector3.new( size.X, -size.Y, -size.Z),
-                        Vector3.new(-size.X, -size.Y, -size.Z),
-                    }) do
-                        local pos, visible = camera:WorldToViewportPoint(cf:PointToWorldSpace(offset))
-                        if visible then
-                            local v2 = Vector2.new(pos.X, pos.Y)
-                            min = min:Min(v2)
-                            max = max:Max(v2)
-                            onscreen = true
-                        end
-                    end
+    local parts, root
+    if instance:IsA("BasePart") then
+        parts, root = { instance }, instance
+    elseif instance:IsA("Model") then
+        local cached = bodycache[instance]
+        if not cached or os.clock() >= cached.nextScan then
+            cached = { parts = {}, nextScan = os.clock() + 0.5 }
+            for _, part in ipairs(instance:GetChildren()) do
+                if part:IsA("BasePart") then
+                    cached.parts[#cached.parts + 1] = part
+                elseif not options.excludeAccessories and part:IsA("Accessory") then
+                    local handle = part:FindFirstChild("Handle")
+                    if handle and handle:IsA("BasePart") then cached.parts[#cached.parts + 1] = handle end
                 end
             end
+            bodycache[instance] = cached
         end
-    elseif instance:IsA("BasePart") then
-        local size = (instance.Size / 2)
-        local cf = instance.CFrame
-        for _, offset in ipairs({
-            Vector3.new( size.X,  size.Y,  size.Z),
-            Vector3.new(-size.X,  size.Y,  size.Z),
-            Vector3.new( size.X, -size.Y,  size.Z),
-            Vector3.new(-size.X, -size.Y,  size.Z),
-            Vector3.new( size.X,  size.Y, -size.Z),
-            Vector3.new(-size.X,  size.Y, -size.Z),
-            Vector3.new( size.X, -size.Y, -size.Z),
-            Vector3.new(-size.X, -size.Y, -size.Z),
-        }) do
-            local pos, visible = camera:WorldToViewportPoint(cf:PointToWorldSpace(offset))
-            if visible then
-                local v2 = Vector2.new(pos.X, pos.Y)
-                min = min:Min(v2)
-                max = max:Max(v2)
-                onscreen = true
-            end
+        parts = cached.parts
+        root = instance:FindFirstChild("HumanoidRootPart") or instance.PrimaryPart or parts[1]
+    end
+    if not root or not root.Parent then return Vector2.zero, Vector2.zero, false end
+    local frame = root.CFrame
+    local low, high = Vector3.new(math.huge,math.huge,math.huge), Vector3.new(-math.huge,-math.huge,-math.huge)
+    local count = 0
+    for _, part in ipairs(parts) do
+        if part.Parent then
+            local cf = frame:ToObjectSpace(part.CFrame)
+            local half = part.Size * 0.5
+            local r, u, l = cf.RightVector, cf.UpVector, cf.LookVector
+            local extent = Vector3.new(
+                math.abs(r.X)*half.X + math.abs(u.X)*half.Y + math.abs(l.X)*half.Z,
+                math.abs(r.Y)*half.X + math.abs(u.Y)*half.Y + math.abs(l.Y)*half.Z,
+                math.abs(r.Z)*half.X + math.abs(u.Z)*half.Y + math.abs(l.Z)*half.Z)
+            low, high = low:Min(cf.Position-extent), high:Max(cf.Position+extent)
+            count = count + 1
         end
     end
-
-    return min, max, onscreen
+    if count == 0 then return Vector2.zero, Vector2.zero, false end
+    local center = (low+high)*0.5
+    local half = (high-low)*0.5*math.max(1, esplib.box.padding or 1)
+    local min, max = Vector2.new(math.huge,math.huge), Vector2.new(-math.huge,-math.huge)
+    for _, sign in ipairs(signs) do
+        local point = frame:PointToWorldSpace(center + half*sign)
+        local projected = camera:WorldToViewportPoint(point)
+        -- Hide near-plane intersections instead of generating enormous boxes.
+        if projected.Z <= 0.1 then return Vector2.zero, Vector2.zero, false end
+        local pixel = Vector2.new(projected.X, projected.Y)
+        -- Offscreen corners still contribute: don't chop off heads/feet.
+        min, max = min:Min(pixel), max:Max(pixel)
+    end
+    local view = camera.ViewportSize
+    return min, max, max.X >= 0 and max.Y >= 0 and min.X <= view.X and min.Y <= view.Y
 end
 
 function espfunctions.add_box(instance)
@@ -154,7 +139,7 @@ function espfunctions.add_box(instance)
 
     box.corner_fill = {}
     box.corner_outline = {}
-    for i = 1, 8 do
+    for i = 1, (options.disableCorners and 0 or 8) do
         local outline = Drawing.new("Line")
         outline.Thickness = 3
         outline.Transparency = 1
@@ -233,7 +218,10 @@ function espfunctions.add_tracer(instance)
 end
 
 -- // main thread
-run_service.RenderStepped:Connect(function()
+local renderConnection
+function espfunctions.update(currentCamera)
+    camera = currentCamera or workspace.CurrentCamera
+    if not camera then return end
     for instance, data in pairs(espinstances) do
         if not instance or not instance.Parent then
             if data.box then
@@ -261,10 +249,7 @@ run_service.RenderStepped:Connect(function()
                 data.tracer.fill:Remove()
             end
             espinstances[instance] = nil
-            continue
-        end
-
-        if instance:IsA("Model") and not instance.PrimaryPart then
+            bodycache[instance] = nil
             continue
         end
 
@@ -296,7 +281,7 @@ run_service.RenderStepped:Connect(function()
                         line.Visible = false
                     end
 
-                elseif esplib.box.type == "corner" then
+                elseif esplib.box.type == "corner" and #box.corner_fill == 8 then
                     local fill_lines = box.corner_fill
                     local outline_lines = box.corner_outline
                     local fill_color = esplib.box.fill
@@ -363,7 +348,7 @@ run_service.RenderStepped:Connect(function()
                     local padding = 1
                     local x = min.X - 3 - 1 - padding
                     local y = min.Y - padding
-                    local health = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+                    local health = math.clamp(humanoid.Health / math.max(humanoid.MaxHealth, 1), 0, 1)
                     local fillheight = height * health
 
                     outline.Color = esplib.healthbar.outline
@@ -386,7 +371,7 @@ run_service.RenderStepped:Connect(function()
             if esplib.name.enabled and onscreen then
                 local text = data.name
                 local center_x = (min.X + max.X) / 2
-                local y = min.Y - 15
+                local y = min.Y - esplib.name.size - 3
 
                 local name_str = instance.Name
                 local humanoid = instance:FindFirstChildOfClass("Humanoid")
@@ -484,7 +469,36 @@ run_service.RenderStepped:Connect(function()
             end
         end
     end
-end)
+end
+
+function espfunctions.remove(instance)
+    local data = espinstances[instance]
+    if not data then return end
+    if data.box then
+        data.box.outline:Remove(); data.box.fill:Remove()
+        for _, line in ipairs(data.box.corner_fill) do line:Remove() end
+        for _, line in ipairs(data.box.corner_outline) do line:Remove() end
+    end
+    if data.healthbar then data.healthbar.outline:Remove(); data.healthbar.fill:Remove() end
+    if data.name then data.name:Remove() end
+    if data.distance then data.distance:Remove() end
+    if data.tracer then data.tracer.outline:Remove(); data.tracer.fill:Remove() end
+    espinstances[instance], bodycache[instance] = nil, nil
+end
+
+function espfunctions.unload()
+    if renderConnection then renderConnection:Disconnect(); renderConnection = nil end
+    for instance in pairs(espinstances) do espfunctions.remove(instance) end
+end
+
+espfunctions.get_bounds = function(instance, currentCamera)
+    camera = currentCamera or workspace.CurrentCamera
+    if not camera then return Vector2.zero, Vector2.zero, false end
+    return get_bounding_box(instance)
+end
+if not options.manualUpdate then
+    renderConnection = run_service.RenderStepped:Connect(function() espfunctions.update() end)
+end
 
 -- // return
 for k, v in pairs(espfunctions) do

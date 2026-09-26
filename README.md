@@ -1,4 +1,13 @@
 # esp-lib.lua
+
+## Attribute fork
+
+Fork of [tulontop/esp-lib.lua](https://github.com/tulontop/esp-lib.lua), written by tul (@.lutyeh). Upstream README permits modification and use in other projects; no separate license file was present at the forked revision `243c0aa8d8b1167da08d661b655de6c678d38014`.
+
+Changes: full body-part bounds (including R6 legs and R15 feet), offscreen-corner retention, near-plane safety, current-camera refresh, and explicit `remove(instance)` / `unload()` lifecycle APIs. Bounds use cached part membership and eight projections of a conservative body-aligned box, not an assumed character height. Animating limbs can widen the box slightly; accessories can be excluded to avoid oversized hat/tool bounds.
+
+An optional options table can be passed to the loaded chunk: `{ isolated = true, manualUpdate = true, disableCorners = true, excludeAccessories = true }`. Isolated mode does not overwrite `getgenv().esplib`; manual mode requires `library.update(camera)` from the owner's render loop. Disabling corners allocates only two box Squares, two health Squares and one name Text for the three basic features. `get_bounds(instance, camera)` exposes the shared bounding calculation for tests. Existing no-argument loading remains supported.
+
 A lightweight esp library for roblox using the drawing api.
 
 Provides programmatic access to 2d visuals including bounding boxes, health bars, name tags, distances and tracers for in-game instances.
